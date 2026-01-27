@@ -1,8 +1,8 @@
 # 明日方舟 电子通行证 Buildroot SDK
 
-基于aodzip老师的buildroot-tiny200 发行版，更改rootfs文件系统为UBIFS，更新上游U-boot，并进行硬件解码相关的修补。
+基于aodzip老师的buildroot-tiny200 发行版，更改rootfs文件系统为UBIFS，在Uboot层做了dtoverlay，并进行硬件解码相关的修补。
 
-本buildroot是“三合一”buildroot，可以生成Kernel、U-boot、rootfs。
+本buildroot是“四合一”buildroot，可以生成Kernel、U-boot、rootfs、epass_drm_app。
 
 默认用户名：root 默认密码：toor
 
@@ -37,7 +37,11 @@ make rhodesisland_epass_defconfig
 ```shell
 make
 ```
-构建的结果在output/images中。其中flash_pack_xxxx.zip是带有Windows刷机工具的更新包，可以直接交付。
+构建的结果在output/images中。其中：
+
+* U-boot: u-boot-sunxi-with-nand-spl.bin
+* Boot分区（包括kernel和设备树）: boot_ubi.img
+* Rootfs（包括epass_drm_app等）: rootfs_ubi.img
 
 ### 重新构建内核及设备树
 ```shell
@@ -51,11 +55,36 @@ make
 
 ### 直接烧录系统
 
-需要先安装[XFEL](https://github.com/xboot/xfel)
+需要先安装[XFEL](https://github.com/xboot/xfel)和dfu-util
 
-```shell
-./flashsystem.sh
+首先准备bootenv.txt，内容为：
+
 ```
+device_rev=0.3
+screen=hsd
+(这里加一个换行，然后加一个\\0x00)
+```
+
+> 注意：这里的device_rev和screen需要根据你的设备实际情况填写。
+> device_rev: 0.2/0.3/0.5/0.6
+> screen: boe/hsd/laowu
+
+然后执行：
+```shell
+xfel spinand erase 0 0x8000000
+xfel spinand write 0 u-boot-sunxi-with-nand-spl.bin
+xfel spinand write 0xfa000 bootenv.txt
+xfel reset
+
+dfu-util -R -a boot -D boot_ubi.img
+dfu-util -R -a rootfs -D rootfs_ubi.img
+```
+
+## 更新说明
+
+当更新了epass_drm_app后，需要bump这里的buildroot package：
+
+在package/epass_drm_app/epass_drm_app.mk中，将EPASS_DRM_APP_VERSION改为新的版本号。
 
 # Buildroot Package for Allwinner SIPs
 Opensource development package for Allwinner F1C100s & F1C200s
