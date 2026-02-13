@@ -93,7 +93,7 @@
 		function = "rtp";
 	};
 
-    rtp_pins_01: rtp-pins-0 {
+    rtp_pins_01: rtp-pins-01 {
 		pins = "PA0","PA1";
 		function = "rtp";
 	};
