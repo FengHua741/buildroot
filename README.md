@@ -34,6 +34,23 @@ make rhodesisland_epass_defconfig
 ```
 
 ### 构建
+
+Buildroot在构建时会下载所有源码。对于国内等网络环境特殊的情况，可使用相关手段连接网络，或下载编译源码包：
+
+```
+通过网盘分享的文件：epass-dl.tar.gz
+链接: https://pan.baidu.com/s/1eCxZEsx1CHZdeZn9TVkyzg?pwd=34qg 提取码: 34qg 
+--来自百度网盘超级会员v4的分享
+```
+
+放到buildroot目录下然后解压：
+
+```shell
+tar xzvf epass-dl.tar.gz
+```
+
+开始构建
+
 ```shell
 make
 ```
@@ -85,6 +102,33 @@ dfu-util -R -a rootfs -D rootfs_ubi.img
 当更新了epass_drm_app后，需要bump这里的buildroot package：
 
 在package/epass_drm_app/epass_drm_app.mk中，将EPASS_DRM_APP_VERSION改为新的版本号。
+
+## 使用docker 启动构建环境
+
+> dockerfile会把APT源替换为国内源，以提高下载速度。
+> 如果你需要使用国外源，请手动注释Dockerfile中的APT源替换的命令。
+
+```shell
+docker build \
+  --build-arg UID=$(id -u) \
+  --build-arg GID=$(id -g) \
+  --build-arg USERNAME=$(whoami) \
+  -t epass-buildroot .
+```
+
+然后进入容器：
+```
+docker run -it --rm \
+    --user $(id -u):$(id -g) \
+    -v $(pwd):/buildroot \
+    epass-buildroot
+```
+
+然后就可以在容器中进行构建了。
+``` shell
+make rhodesisland_epass_defconfig
+make -j$(nproc)
+```
 
 # Buildroot Package for Allwinner SIPs
 Opensource development package for Allwinner F1C100s & F1C200s
