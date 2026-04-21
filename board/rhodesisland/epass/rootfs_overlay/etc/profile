@@ -1,0 +1,28 @@
+export PATH="/bin:/sbin:/usr/bin:/usr/sbin"
+
+if [ "$PS1" ]; then
+	if [ "`id -u`" -eq 0 ]; then
+		export PS1='# '
+	else
+		export PS1='$ '
+	fi
+fi
+
+export EDITOR='/bin/vi'
+
+# Source configuration files from /etc/profile.d
+for i in /etc/profile.d/*.sh ; do
+	if [ -r "$i" ]; then
+		. $i
+	fi
+done
+unset i
+
+# Auto expand rootfs on first boot
+if [ -f /etc/init.d/S10expand_rootfs ]; then
+    /etc/init.d/S10expand_rootfs start
+    if [ -f /tmp/need_reboot_after_expand ]; then
+        rm -f /tmp/need_reboot_after_expand
+        reboot
+    fi
+fi

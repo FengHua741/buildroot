@@ -1,0 +1,28 @@
+#!/bin/sh
+
+# Mount proc, sysfs, devtmpfs, and other essential filesystems
+
+mount -t proc proc /proc 2>/dev/null
+mount -t sysfs sysfs /sys 2>/dev/null
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+mount -t tmpfs tmpfs /tmp 2>/dev/null
+mount -t tmpfs tmpfs /run 2>/dev/null
+
+# Create /etc/mtab symlink to /proc/mounts
+# This is needed by many tools (resize2fs, df, mount, etc.)
+if [ ! -e /etc/mtab ]; then
+    ln -s /proc/mounts /etc/mtab
+fi
+
+# Watchdog disabled - system is stable enough without it
+# If you need watchdog, uncomment the following lines:
+#
+# if [ -e /dev/watchdog ]; then
+#     (
+#         while true; do
+#             echo -n "" > /dev/watchdog 2>/dev/null
+#             sleep 5
+#         done
+#     ) > /dev/null 2>&1 &
+#     echo "Watchdog feeder started (silent mode)"
+# fi

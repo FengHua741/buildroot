@@ -84,7 +84,7 @@ screen=hsd
 
 > 注意：这里的device_rev和screen需要根据你的设备实际情况填写。
 > device_rev: 0.2/0.3/0.5/0.6
-> screen: boe/hsd/laowu
+> screen: boe/hsd/laowu (老五屏)
 
 然后执行：
 ```shell

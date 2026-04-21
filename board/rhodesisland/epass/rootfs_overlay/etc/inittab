@@ -1,0 +1,30 @@
+# /etc/inittab
+#
+# Copyright (C) 2001 Erik Andersen <andersen@codepoet.org>
+#
+# Note: BusyBox init doesn't support runlevels.  The runlevels field is
+# completely ignored by BusyBox. The init script is specified by the
+# sysinit action and the shutdown script is specified by the shutdown
+# action.
+
+# System initialization
+::sysinit:/etc/init.d/rcS
+
+# Start an "askfirst" shell on the console (whatever that may be)
+::askfirst:-/bin/sh
+
+# Start an "askfirst" shell on /dev/tty2-4
+tty2::askfirst:-/bin/sh
+tty3::askfirst:-/bin/sh
+tty4::askfirst:-/bin/sh
+
+# /bin/autologin on tty0 (screen) only
+tty0::respawn:/sbin/getty -L tty0 0 vt100 -n -l /bin/autologin
+console::respawn:/sbin/getty -L ttyS0 0 vt100 # GENERIC_SERIAL
+
+# Stuff to do for the 3-finger salute
+::ctrlaltdel:/sbin/reboot
+
+# Stuff to do before rebooting
+::shutdown:/etc/init.d/rcK
+::shutdown:/sbin/swapoff -a

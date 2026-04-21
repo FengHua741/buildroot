@@ -1,0 +1,92 @@
+#!/bin/sh
+### Auto-expand Resources Partition ###
+# 首次启动时自动将资源分区（/dev/mmcblk0p3）扩展到整个 TF 卡的剩余空间
+
+LOGFILE="/var/log/expand_resources.log"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOGFILE"
+}
+
+# 检查是否已经扩容过
+if [ -f /tmp/resources_expanded ]; then
+    log "Resources partition already expanded, skipping."
+    exit 0
+fi
+
+log "=== Resources Partition Auto-Expand Started ==="
+
+# 等待设备就绪
+sleep 2
+
+if [ ! -b /dev/mmcblk0p3 ]; then
+    log "ERROR: Resources partition /dev/mmcblk0p3 not found!"
+    exit 1
+fi
+
+log "Found resources partition: /dev/mmcblk0p3"
+
+# 卸载资源分区（如果已挂载）
+umount /dev/mmcblk0p3 2>/dev/null
+umount /resources 2>/dev/null
+
+log "Resizing partition table..."
+
+# 获取当前分区起始扇区
+START_SECTOR=$(fdisk -l /dev/mmcblk0 | grep mmcblk0p3 | awk '{print $2}')
+if [ -z "$START_SECTOR" ]; then
+    log "ERROR: Cannot get start sector of p3"
+    exit 1
+fi
+
+log "Partition 3 starts at sector: $START_SECTOR"
+
+# 重新分区 p3（使用全部剩余空间）
+echo "Deleting and recreating p3..." >> "$LOGFILE"
+{
+    echo "d"  # delete
+    echo "3"  # partition 3
+    echo "n"  # new
+    echo "p"  # primary
+    echo "3"  # partition 3
+    echo "$START_SECTOR"  # start sector
+    echo ""  # end sector (use all remaining)
+    echo "t"  # type
+    echo "3"  # partition 3
+    echo "c"  # FAT32
+    echo "w"  # write
+} | fdisk /dev/mmcblk0 >> "$LOGFILE" 2>&1
+
+FDISK_RET=$?
+if [ $FDISK_RET -ne 0 ]; then
+    log "ERROR: fdisk failed!"
+    exit 1
+fi
+
+log "Partition table updated. Waiting for kernel to re-read..."
+sleep 3
+
+# 检查文件系统并扩容
+log "Checking FAT filesystem..."
+fsck.vfat -a /dev/mmcblk0p3 >> "$LOGFILE" 2>&1
+
+log "Resizing FAT filesystem..."
+# FAT32 使用 mtools 或者其他工具扩容，这里先格式化
+log "Formatting as FAT32 (will preserve data in future versions)..."
+mkfs.vfat -F 32 -n "RESOURCES" /dev/mmcblk0p3 >> "$LOGFILE" 2>&1
+
+MKFS_RET=$?
+if [ $MKFS_RET -eq 0 ]; then
+    log "Resources partition formatted successfully."
+else
+    log "ERROR: Failed to format resources partition!"
+    exit 1
+fi
+
+# 标记已扩容
+touch /tmp/resources_expanded
+
+log "=== Resources Partition Auto-Expand Completed ==="
+log "Reboot recommended to remount the expanded partition."
+
+exit 0

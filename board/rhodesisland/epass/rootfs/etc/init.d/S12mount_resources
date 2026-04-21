@@ -1,0 +1,121 @@
+#!/bin/sh
+### Mount Resources Partition ###
+# 将 /dev/mmcblk0p3 挂载到 /resources，并创建符号链接
+
+LOGFILE="/var/log/mount_resources.log"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOGFILE"
+}
+
+log "=== Mounting Resources Partition ==="
+
+# 等待设备就绪
+sleep 1
+
+if [ ! -b /dev/mmcblk0p3 ]; then
+    log "WARNING: Resources partition /dev/mmcblk0p3 not found!"
+    log "Using fallback directories in rootfs."
+    # 创建fallback目录
+    mkdir -p /resources/app
+    mkdir -p /resources/assets
+    mkdir -p /resources/dispimg
+else
+    log "Found resources partition: /dev/mmcblk0p3"
+    
+    # 创建挂载点
+    mkdir -p /resources
+    
+    # 挂载资源分区
+    log "Mounting /dev/mmcblk0p3 to /resources..."
+    mount -o iocharset=utf8 /dev/mmcblk0p3 /resources
+    MOUNT_RET=$?
+    
+    if [ $MOUNT_RET -eq 0 ]; then
+        log "Resources partition mounted successfully."
+        
+        # 确保目录存在
+        mkdir -p /resources/app
+        mkdir -p /resources/assets
+        mkdir -p /resources/dispimg
+        
+        # 迁移旧目录文件到资源分区（仅首次启动）
+        if [ ! -f /tmp/resources_migrated ]; then
+            log "First boot detected. Migrating files from rootfs to resources partition..."
+            
+            # 迁移 /app
+            if [ -d /app_old ] && [ ! -L /app_old ]; then
+                log "Migrating /app_old to /resources/app..."
+                cp -a /app_old/* /resources/app/ 2>/dev/null || true
+                rm -rf /app_old
+            fi
+            
+            # 迁移 /assets  
+            if [ -d /assets_old ] && [ ! -L /assets_old ]; then
+                log "Migrating /assets_old to /resources/assets..."
+                cp -a /assets_old/* /resources/assets/ 2>/dev/null || true
+                rm -rf /assets_old
+            fi
+            
+            # 迁移 /dispimg
+            if [ -d /dispimg_old ] && [ ! -L /dispimg_old ]; then
+                log "Migrating /dispimg_old to /resources/dispimg..."
+                cp -a /dispimg_old/* /resources/dispimg/ 2>/dev/null || true
+                rm -rf /dispimg_old
+            fi
+            
+            # 标记已迁移
+            touch /tmp/resources_migrated
+            log "File migration completed."
+        else
+            log "Resources already migrated, skipping."
+        fi
+        
+        log "Resource directories verified."
+    else
+        log "ERROR: Failed to mount resources partition!"
+        log "Using fallback directories in rootfs."
+        mkdir -p /resources/app
+        mkdir -p /resources/assets
+        mkdir -p /resources/dispimg
+    fi
+fi
+
+# 创建符号链接（如果不存在）
+log "Creating symbolic links..."
+
+# 删除旧目录（如果存在且不是符号链接）
+if [ -d /app ] && [ ! -L /app ]; then
+    log "Removing old /app directory"
+    rm -rf /app
+fi
+
+if [ -d /assets ] && [ ! -L /assets ]; then
+    log "Removing old /assets directory"
+    rm -rf /assets
+fi
+
+if [ -d /dispimg ] && [ ! -L /dispimg ]; then
+    log "Removing old /dispimg directory"
+    rm -rf /dispimg
+fi
+
+# 创建符号链接
+if [ ! -L /app ]; then
+    ln -sf /resources/app /app
+    log "Created symlink: /app -> /resources/app"
+fi
+
+if [ ! -L /assets ]; then
+    ln -sf /resources/assets /assets
+    log "Created symlink: /assets -> /resources/assets"
+fi
+
+if [ ! -L /dispimg ]; then
+    ln -sf /resources/dispimg /dispimg
+    log "Created symlink: /dispimg -> /resources/dispimg"
+fi
+
+log "=== Resources Partition Mount Completed ==="
+
+exit 0

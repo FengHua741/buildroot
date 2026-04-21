@@ -4,7 +4,14 @@
 
 / {
 	model = "ArkEPass v0.3";
+
+	poweroff: gpio-poweroff {
+		compatible = "gpio-poweroff";
+		gpios = <&pio 4 2 GPIO_ACTIVE_HIGH>; //PE2
+		timeout-ms = <3000>;
+	};
 };
+
 
 &st7701initseq {
 	sda-gpios = <&pio 4 4 GPIO_ACTIVE_HIGH>; /* PE4 */
@@ -12,32 +19,41 @@
 	cs-gpios = <&pio 4 3 GPIO_ACTIVE_HIGH>; /* PE3 */
 };
 
+
 &lradc {
+	// pwr btn
+	button-num-0 {
+		label = "Number_0";
+		linux,code = <KEY_0>;
+		channel = <0>;
+		voltage = <0>;
+	};
+
 	button-num-1 {
 		label = "Number_1";
 		linux,code = <KEY_1>;
 		channel = <0>;
-		voltage = <1111111>;
+		voltage = <1396826>;
 	};
 
 	button-num-2 {
 		label = "Number_2";
 		linux,code = <KEY_2>;
 		channel = <0>;
-		voltage = <825396>;
+		voltage = <1111111>;
 	};
 
 	button-num-3 {
 		label = "Number_3";
 		linux,code = <KEY_3>;
 		channel = <0>;
-		voltage = <444444>;
+		voltage = <825396>;
 	};
 
 	button-num-4 {
 		label = "Number_4";
 		linux,code = <KEY_4>;
 		channel = <0>;
-		voltage = <0>;
+		voltage = <444444>;
 	};
 };

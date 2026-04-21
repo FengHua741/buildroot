@@ -1,0 +1,47 @@
+#!/bin/sh
+### ePass DRM Application Auto-start ###
+
+case "$1" in
+  start)
+    # 检查是否已经有 drm_app 进程在运行
+    if pgrep -f "epass_drm_app" > /dev/null 2>&1; then
+        echo "DRM application already running, skipping..." >> /var/log/drm_app.log 2>&1
+        exit 0
+    fi
+    
+    echo "Starting DRM application..." >> /var/log/drm_app.log 2>&1
+    # 设置 DRM 设备权限
+    chmod 666 /dev/dri/card0 2>/dev/null
+    chmod 666 /dev/dri/renderD128 2>/dev/null
+    
+    # 设置显示环境变量，确保使用 DRM 屏幕显示
+    export DISPLAY=:0
+    export DRM_DEVICE=/dev/dri/card0
+    
+    # 启动主程序，明确使用 DRM 显示，不启动 SD 卡模式
+    /root/epass_drm_app >> /var/log/drm_app.log 2>&1 &
+    DRM_PID=$!
+    echo "DRM application started with PID $DRM_PID (DRM display mode)" >> /var/log/drm_app.log 2>&1
+    
+    # 等待 3 秒，如果有 sd 模式子进程则杀死
+    sleep 3
+    SD_PID=$(ps | grep "epass_drm_app sd" | grep -v grep | awk '{print $1}')
+    if [ -n "$SD_PID" ]; then
+        echo "Killing SD mode subprocess (PID: $SD_PID)" >> /var/log/drm_app.log 2>&1
+        kill $SD_PID 2>/dev/null
+    fi
+    ;;
+  stop)
+    echo "Stopping DRM application..." >> /var/log/drm_app.log 2>&1
+    killall epass_drm_app 2>/dev/null
+    ;;
+  restart)
+    $0 stop
+    sleep 1
+    $0 start
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart}"
+    exit 1
+esac
+exit 0

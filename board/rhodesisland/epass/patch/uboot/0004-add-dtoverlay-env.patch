@@ -1,0 +1,24 @@
+--- a/include/configs/suniv.h
++++ b/include/configs/suniv.h
+@@ -21,4 +21,21 @@
+ #undef CONFIG_VIDEO_LOGO
+ #endif
+ 
++#define CONFIG_EXTRA_ENV_SETTINGS \
++	"kernaddr=0x80008000\0" \
++	"fdtaddr=0x80C00000\0" \
++	"fdtovaddr=0x80D00000\0" \
++	"envtxtaddr=0x80E00000\0" \
++	"loadconfig=fatload mmc 0:1 ${envtxtaddr} /sys-config.conf; env import -t ${envtxtaddr};\0" \
++	"loadbasic=fatload mmc 0:1 ${kernaddr} /${kernelfn}; fatload mmc 0:1 ${fdtaddr} /dt/base/devicetree-${device_rev}.dtb; fatload mmc 0:1 ${fdtovaddr} /dt/screen/${screen}.dtbo;\0" \
++	"patchbasic=fdt addr $fdtaddr; fdt resize 32768; fdt apply $fdtovaddr;\0" \
++	"patchinterface=for ov in ${interface}; do echo Applying Interface ${ov}...; fatload mmc 0:1 ${fdtovaddr} /dt/interface/${ov}.dtbo; fdt apply ${fdtovaddr}; done;\0" \
++	"patchext=for ov in ${ext}; do echo Applying extension ${ov}...; fatload mmc 0:1 ${fdtovaddr} /dt/ext/${ov}.dtbo; fdt apply ${fdtovaddr}; done;\0" \
++	"kernelfn=zImage\0" \
++	"device_rev=0.6\0" \
++	"screen=hsd\0" \
++	"interface=\0" \
++	"ext=\0" \
++	"bootargs=console=ttyS0,115200 console=tty0 panic=5 rootwait root=/dev/mmcblk0p2 earlyprintk rw net.ifnames=0 vt.global_cursor_default=0 loglevel=4 nowatchdog\0"
++
+ #endif /* __CONFIG_H */

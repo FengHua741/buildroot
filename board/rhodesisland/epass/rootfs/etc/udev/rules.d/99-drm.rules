@@ -1,0 +1,6 @@
+# DRM 设备权限
+KERNEL=="renderD[0-9]*", MODE="0666"
+KERNEL=="card[0-9]*", MODE="0666"
+
+# USB 输入设备
+KERNEL=="event[0-9]*", SUBSYSTEM=="input", MODE="0666"

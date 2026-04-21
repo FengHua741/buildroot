@@ -1,0 +1,21 @@
+#!/bin/sh
+### Prepare Resources Migration ###
+# 在挂载资源分区前，将旧目录重命名为 _old
+
+# 检查是否需要迁移
+if [ ! -f /tmp/resources_migrated ]; then
+    # 重命名旧目录
+    if [ -d /app ] && [ ! -L /app ]; then
+        mv /app /app_old
+    fi
+    
+    if [ -d /assets ] && [ ! -L /assets ]; then
+        mv /assets /assets_old
+    fi
+    
+    if [ -d /dispimg ] && [ ! -L /dispimg ]; then
+        mv /dispimg /dispimg_old
+    fi
+fi
+
+exit 0
