@@ -1,92 +1,155 @@
 #!/bin/sh
 ### Auto-expand Resources Partition ###
 # 首次启动时自动将资源分区（/dev/mmcblk0p3）扩展到整个 TF 卡的剩余空间
+# 扩容完成后自动删除此脚本，避免后续执行
 
 LOGFILE="/var/log/expand_resources.log"
+EXPAND_MARKER="/var/lib/resources_expanded"
+PARTITIONED_MARKER="/var/lib/resources_partitioned"
 
+# 日志函数
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOGFILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOGFILE"
 }
 
-# 检查是否已经扩容过
-if [ -f /tmp/resources_expanded ]; then
-    log "Resources partition already expanded, skipping."
+# 错误退出函数
+error_exit() {
+    log "FATAL ERROR: $1"
+    exit 1
+}
+
+log "========================================"
+log "Resources Partition Auto-Expand Script"
+log "========================================"
+
+# 检查是否已经完成扩容
+if [ -f "$EXPAND_MARKER" ]; then
+    log "INFO: Resources partition already expanded (marker exists). Skipping."
+    log "Cleaning up: removing expand script."
+    rm -f "$0"
     exit 0
 fi
 
-log "=== Resources Partition Auto-Expand Started ==="
-
 # 等待设备就绪
+log "Waiting for devices..."
 sleep 2
 
+# 检查资源分区是否存在
 if [ ! -b /dev/mmcblk0p3 ]; then
-    log "ERROR: Resources partition /dev/mmcblk0p3 not found!"
-    exit 1
+    error_exit "Resources partition /dev/mmcblk0p3 not found!"
 fi
-
 log "Found resources partition: /dev/mmcblk0p3"
 
+# 检查TF卡设备
+if [ ! -b /dev/mmcblk0 ]; then
+    error_exit "TF card device /dev/mmcblk0 not found!"
+fi
+
+# 获取TF卡总扇区数
+DISK_TOTAL=$(cat /sys/block/mmcblk0/size 2>/dev/null)
+if [ -z "$DISK_TOTAL" ] || [ "$DISK_TOTAL" = "0" ]; then
+    error_exit "Cannot read TF card size!"
+fi
+log "TF card total size: $DISK_TOTAL sectors ($(( DISK_TOTAL * 512 / 1024 / 1024 )) MB)"
+
+# 获取当前分区3的扇区数
+PART_SIZE=$(cat /sys/block/mmcblk0/mmcblk0p3/size 2>/dev/null)
+if [ -z "$PART_SIZE" ] || [ "$PART_SIZE" = "0" ]; then
+    error_exit "Cannot read partition 3 size!"
+fi
+log "Partition 3 current size: $PART_SIZE sectors ($(( PART_SIZE * 512 / 1024 / 1024 )) MB)"
+
+# 检查是否需要扩容（如果分区大小已达到磁盘的90%，说明已扩容）
+THRESHOLD=$(( DISK_TOTAL * 90 / 100 ))
+if [ "$PART_SIZE" -ge "$THRESHOLD" ]; then
+    log "INFO: Partition 3 already expanded ($PART_SIZE >= $THRESHOLD)."
+    
+    # 检查是否已经格式化并标记
+    if [ ! -f "$EXPAND_MARKER" ]; then
+        log "Partition expanded but not yet marked. Creating marker..."
+        touch "$EXPAND_MARKER"
+        log "Cleaning up: removing expand script."
+        rm -f "$0"
+    fi
+    exit 0
+fi
+
+log "Partition 3 needs expansion: $PART_SIZE < $THRESHOLD"
+
+# 检查是否已经修改了分区表（但还未格式化）
+if [ -f "$PARTITIONED_MARKER" ]; then
+    log "Partition table already modified. Waiting for reboot to take effect."
+    log "This should not happen - if you see this, something went wrong."
+    log "Creating marker and exiting."
+    touch "$EXPAND_MARKER"
+    rm -f "$0"
+    exit 0
+fi
+
 # 卸载资源分区（如果已挂载）
+log "Unmounting resources partition if mounted..."
 umount /dev/mmcblk0p3 2>/dev/null
 umount /resources 2>/dev/null
+sleep 1
 
-log "Resizing partition table..."
-
-# 获取当前分区起始扇区
-START_SECTOR=$(fdisk -l /dev/mmcblk0 | grep mmcblk0p3 | awk '{print $2}')
-if [ -z "$START_SECTOR" ]; then
-    log "ERROR: Cannot get start sector of p3"
-    exit 1
+# 获取分区3的起始扇区
+START_SECTOR=$(cat /sys/block/mmcblk0/mmcblk0p3/start 2>/dev/null)
+if [ -z "$START_SECTOR" ] || [ "$START_SECTOR" = "0" ]; then
+    # 备用方案：从 sfdisk 读取
+    START_SECTOR=$(sfdisk -d /dev/mmcblk0 2>/dev/null | grep "/dev/mmcblk0p3" | sed 's/.*start=\s*//' | sed 's/,.*//')
 fi
-
+if [ -z "$START_SECTOR" ] || [ "$START_SECTOR" = "0" ]; then
+    error_exit "Cannot get start sector of partition 3!"
+fi
 log "Partition 3 starts at sector: $START_SECTOR"
 
-# 重新分区 p3（使用全部剩余空间）
-echo "Deleting and recreating p3..." >> "$LOGFILE"
+# 删除并重建分区3（使用全部剩余空间）
+log "Resizing partition 3 to fill remaining space..."
+log "fdisk commands: delete p3, create p3 from $START_SECTOR to end, type=c (FAT32), write"
 {
-    echo "d"  # delete
-    echo "3"  # partition 3
-    echo "n"  # new
-    echo "p"  # primary
-    echo "3"  # partition 3
+    echo "d"      # delete partition
+    echo "3"      # partition 3
+    echo "n"      # new partition
+    echo "p"      # primary
+    echo "3"      # partition number 3
     echo "$START_SECTOR"  # start sector
-    echo ""  # end sector (use all remaining)
-    echo "t"  # type
-    echo "3"  # partition 3
-    echo "c"  # FAT32
-    echo "w"  # write
+    echo ""       # end sector (use all remaining)
+    echo "t"      # change type
+    echo "3"      # partition 3
+    echo "c"      # W95 FAT32 (LBA)
+    echo "w"      # write table
 } | fdisk /dev/mmcblk0 >> "$LOGFILE" 2>&1
-
 FDISK_RET=$?
+
 if [ $FDISK_RET -ne 0 ]; then
-    log "ERROR: fdisk failed!"
-    exit 1
+    log "WARNING: fdisk returned non-zero ($FDISK_RET)"
+    log "But partition table may still have been written."
 fi
 
-log "Partition table updated. Waiting for kernel to re-read..."
-sleep 3
+# 标记分区表已修改
+touch "$PARTITIONED_MARKER"
 
-# 检查文件系统并扩容
-log "Checking FAT filesystem..."
-fsck.vfat -a /dev/mmcblk0p3 >> "$LOGFILE" 2>&1
+log "========================================"
+log "Partition table modified successfully."
+log "Kernel cannot re-read partition table while in use."
+log "System will reboot to apply changes."
+log "After reboot, formatting will be performed."
+log "========================================"
+log ""
+log "Rebooting in 3 seconds..."
 
-log "Resizing FAT filesystem..."
-# FAT32 使用 mtools 或者其他工具扩容，这里先格式化
-log "Formatting as FAT32 (will preserve data in future versions)..."
-mkfs.vfat -F 32 -n "RESOURCES" /dev/mmcblk0p3 >> "$LOGFILE" 2>&1
-
-MKFS_RET=$?
-if [ $MKFS_RET -eq 0 ]; then
-    log "Resources partition formatted successfully."
+# 删除扩容脚本（清理自身）
+log "Cleaning up: removing expand script."
+rm -f "$0"
+if [ ! -f "$0" ]; then
+    log "Expand script removed successfully."
 else
-    log "ERROR: Failed to format resources partition!"
-    exit 1
+    log "WARNING: Failed to remove expand script."
 fi
 
-# 标记已扩容
-touch /tmp/resources_expanded
-
-log "=== Resources Partition Auto-Expand Completed ==="
-log "Reboot recommended to remount the expanded partition."
+# 重启系统（内核将在重启后识别新分区表）
+sleep 3
+log "Rebooting..."
+reboot
 
 exit 0

@@ -1,11 +1,14 @@
 #!/bin/sh
 ### Mount Resources Partition ###
 # 将 /dev/mmcblk0p3 挂载到 /resources，并创建符号链接
+# 如果检测到分区表已修改（但还未格式化），则执行格式化
 
 LOGFILE="/var/log/mount_resources.log"
+PARTITIONED_MARKER="/var/lib/resources_partitioned"
+EXPAND_MARKER="/var/lib/resources_expanded"
 
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOGFILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOGFILE"
 }
 
 log "=== Mounting Resources Partition ==="
@@ -21,7 +24,83 @@ if [ ! -b /dev/mmcblk0p3 ]; then
     mkdir -p /resources/assets
     mkdir -p /resources/dispimg
 else
+    # 正常挂载资源分区
     log "Found resources partition: /dev/mmcblk0p3"
+    
+    # 检查是否需要格式化
+    # 逻辑：如果内核看到的分区大小远大于当前mount得到的容量，则需要格式化
+    NEED_FORMAT=0
+
+    if [ -f "$PARTITIONED_MARKER" ]; then
+        log "Partition table was modified (PARTITIONED_MARKER exists). Will format FAT32."
+        NEED_FORMAT=1
+    fi
+
+    # 获取内核看到的分区大小（扇区）
+    PART_SECTORS=$(cat /sys/block/mmcblk0/mmcblk0p3/size 2>/dev/null)
+    DISK_SECTORS=$(cat /sys/block/mmcblk0/size 2>/dev/null)
+
+    if [ -n "$PART_SECTORS" ] && [ -n "$DISK_SECTORS" ] && [ "$DISK_SECTORS" -gt 0 ]; then
+        THRESHOLD=$(( DISK_SECTORS * 90 / 100 ))
+        if [ "$PART_SECTORS" -ge "$THRESHOLD" ] && [ ! -f "$EXPAND_MARKER" ]; then
+            log "Partition is large ($PART_SECTORS sectors) but no expand marker. Will format."
+            NEED_FORMAT=1
+        fi
+    fi
+
+    # 额外检查：尝试挂载分区，如果挂载成功但分区容量没有占满分区大小，则需要格式化
+    if [ "$NEED_FORMAT" = "0" ] && [ -n "$PART_SECTORS" ] && [ "$PART_SECTORS" -gt 0 ]; then
+        # 尝试挂载查看实际容量
+        mkdir -p /resources
+        if mount -o iocharset=utf8 /dev/mmcblk0p3 /resources 2>/dev/null; then
+            # 获取文件系统实际容量（KB）
+            FS_SIZE_KB=$(df -k /resources 2>/dev/null | awk 'NR==2{print $2}')
+            PART_SIZE_KB=$(( PART_SECTORS * 512 / 1024 ))
+            umount /resources 2>/dev/null
+
+            if [ -n "$FS_SIZE_KB" ] && [ "$FS_SIZE_KB" -gt 0 ]; then
+                # 如果文件系统容量小于分区大小的50%，说明文件系统头是旧的，需要重新格式化
+                HALF_PART=$(( PART_SIZE_KB / 2 ))
+                if [ "$FS_SIZE_KB" -lt "$HALF_PART" ]; then
+                    log "Filesystem size ($FS_SIZE_KB KB) << Partition size ($PART_SIZE_KB KB). Old FAT32 header detected. Will reformat."
+                    NEED_FORMAT=1
+                else
+                    log "Filesystem size ($FS_SIZE_KB KB) matches partition size. No reformat needed."
+                fi
+            fi
+        fi
+    fi
+
+    if [ "$NEED_FORMAT" = "1" ]; then
+        log "Formatting /dev/mmcblk0p3 as FAT32..."
+
+        # 确保分区未挂载
+        umount /dev/mmcblk0p3 2>/dev/null
+        umount /resources 2>/dev/null
+        sleep 1
+
+        # 格式化 FAT32
+        if command -v mkdosfs >/dev/null 2>&1; then
+            mkdosfs -F 32 -n "RESOURCES" -s 8 /dev/mmcblk0p3 >> "$LOGFILE" 2>&1
+            MKFS_RET=$?
+        elif command -v mkfs.vfat >/dev/null 2>&1; then
+            mkfs.vfat -F 32 -n "RESOURCES" -s 8 /dev/mmcblk0p3 >> "$LOGFILE" 2>&1
+            MKFS_RET=$?
+        else
+            log "ERROR: No FAT32 formatting tool found!"
+            MKFS_RET=1
+        fi
+
+        if [ $MKFS_RET -eq 0 ]; then
+            log "FAT32 formatting completed successfully."
+            touch "$EXPAND_MARKER"
+            log "Expansion marker created: $EXPAND_MARKER"
+            rm -f "$PARTITIONED_MARKER"
+            log "Partitioned marker removed."
+        else
+            log "ERROR: Failed to format partition 3!"
+        fi
+    fi
     
     # 创建挂载点
     mkdir -p /resources
@@ -34,13 +113,23 @@ else
     if [ $MOUNT_RET -eq 0 ]; then
         log "Resources partition mounted successfully."
         
+        # 显示分区大小
+        PART_SIZE=$(cat /sys/block/mmcblk0/mmcblk0p3/size 2>/dev/null)
+        if [ -n "$PART_SIZE" ] && [ "$PART_SIZE" != "0" ]; then
+            log "Partition 3 size: $(( PART_SIZE * 512 / 1024 / 1024 )) MB"
+        fi
+        
         # 确保目录存在
         mkdir -p /resources/app
         mkdir -p /resources/assets
         mkdir -p /resources/dispimg
+        # 确保 .gitkeep 文件存在（格式化后恢复）
+        touch /resources/app/.gitkeep 2>/dev/null || true
+        touch /resources/assets/.gitkeep 2>/dev/null || true
+        touch /resources/dispimg/.gitkeep 2>/dev/null || true
         
         # 迁移旧目录文件到资源分区（仅首次启动）
-        if [ ! -f /tmp/resources_migrated ]; then
+        if [ ! -f /var/lib/resources_migrated ]; then
             log "First boot detected. Migrating files from rootfs to resources partition..."
             
             # 迁移 /app
@@ -65,7 +154,7 @@ else
             fi
             
             # 标记已迁移
-            touch /tmp/resources_migrated
+            touch /var/lib/resources_migrated
             log "File migration completed."
         else
             log "Resources already migrated, skipping."
